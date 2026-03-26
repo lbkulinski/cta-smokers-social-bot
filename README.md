@@ -73,17 +73,17 @@ Upload `lambda.zip` to your Lambda function.
 ## Post Format
 
 ```
-🚬 Blue Line
-
-Next Stop: Pulaski
-Car: 7109 · Run: 141
-```
-
-If the destination is known, the header includes it:
-
-```
 🚬 Red Line to 95th/Dan Ryan
 
 Next Stop: Clark/Lake
 Car: 1234 · Run: 101
+```
+
+Run number is optional and omitted when unavailable:
+
+```
+🚬 Blue Line to O'Hare
+
+Next Stop: Pulaski
+Car: 7109
 ```
