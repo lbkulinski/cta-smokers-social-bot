@@ -5,7 +5,7 @@ import requests
 
 def _load_secrets() -> None:
     client = boto3.client("secretsmanager")
-    secret = client.get_secret_value(SecretId="prod/cta-smokers-bot")
+    secret = client.get_secret_value(SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"])
     data = json.loads(secret["SecretString"])
     for key, value in data.items():
         os.environ[key] = value
@@ -111,7 +111,7 @@ TRAIN_LINE_LABELS = {
     "YELLOW": "Yellow",
 }
 
-CTA_STOPS_URL = "https://data.cityofchicago.org/resource/8pix-ypme.json"
+CTA_STOPS_URL = os.environ["CTA_STOPS_URL"]
 
 
 def get_station_name(map_id: str) -> str:
