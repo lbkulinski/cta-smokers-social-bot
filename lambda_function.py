@@ -113,11 +113,13 @@ TRAIN_LINE_LABELS = {
 
 CTA_STOPS_URL = os.environ["CTA_STOPS_URL"]
 
+LOOP_DESTINATION_ID = "0"
+
 
 def get_station_name(map_id: str) -> str:
     if not _station_cache:
         _load_station_cache()
-    return _station_cache.get(map_id, f"station {map_id}")
+    return _station_cache.get(str(map_id), f"station {map_id}")
 
 
 def _load_station_cache() -> None:
@@ -141,8 +143,13 @@ def build_post(report: dict) -> str:
     next_station_id = report.get("nextStationId", "")
     station_name = get_station_name(next_station_id)
 
-    destination_id = report.get("destinationId", "")
-    destination_name = get_station_name(destination_id) if destination_id else None
+    destination_id = report.get("destinationId")
+    if destination_id == LOOP_DESTINATION_ID:
+        destination_name = "Loop"
+    elif destination_id:
+        destination_name = get_station_name(destination_id)
+    else:
+        destination_name = None
 
     car_number = report.get("carNumber", "unknown")
     run_number = report.get("runNumber")
