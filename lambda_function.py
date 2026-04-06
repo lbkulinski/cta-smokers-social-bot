@@ -114,10 +114,10 @@ TRAIN_LINE_LABELS = {
 CTA_STOPS_URL = os.environ["CTA_STOPS_URL"]
 
 
-def get_station_name(map_id: str) -> str:
+def get_station_name(map_id) -> str:
     if not _station_cache:
         _load_station_cache()
-    return _station_cache.get(map_id, f"station {map_id}")
+    return _station_cache.get(str(map_id), f"station {map_id}")
 
 
 def _load_station_cache() -> None:
