@@ -52,6 +52,7 @@ jobs:
 
       - name: Build deployment package
         run: |
+          rm -f lambda.zip
           cd package && zip -r ../lambda.zip . && cd ..
           zip lambda.zip lambda_function.py
 
