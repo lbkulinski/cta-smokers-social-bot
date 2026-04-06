@@ -5,6 +5,13 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUFF_VERSION: "0.15.9"
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -20,7 +27,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install ruff
-        run: pip install ruff==0.15.9
+        run: pip install ruff==${{ env.RUFF_VERSION }}
 
       - name: Lint
         run: ruff check lambda_function.py
