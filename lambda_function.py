@@ -78,6 +78,16 @@ def mastodon_post(text: str) -> dict:
     return resp.json()
 
 
+def discord_post(text: str) -> dict:
+    resp = requests.post(
+        os.environ["DISCORD_WEBHOOK_URL"],
+        json={"content": text},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return {}
+
+
 def bluesky_post(text: str) -> dict:
     token = _bluesky_token()
     resp = requests.post(
@@ -199,6 +209,12 @@ def lambda_handler(event, context):
             print(f"Threads post created, id={response['id']}")
         except Exception as e:
             print(f"Failed to post to Threads: {e}")
+
+        try:
+            discord_post(post_text)
+            print("Discord post created")
+        except Exception as e:
+            print(f"Failed to post to Discord: {e}")
 
 
 def deserialize_dynamo_image(image: dict) -> dict:
