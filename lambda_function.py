@@ -97,7 +97,7 @@ def _refresh_threads_token() -> None:
             SecretString=json.dumps(data),
         )
     except Exception as e:
-        print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}")
+        print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}: {e}")
 
     print("Threads token refreshed")
 
@@ -226,6 +226,8 @@ def build_post(report: dict) -> str:
 
 
 def lambda_handler(event, context):
+    _maybe_refresh_threads_token()
+
     for record in event.get("Records", []):
         if record.get("eventName") != "INSERT":
             continue
@@ -256,8 +258,6 @@ def lambda_handler(event, context):
             print(f"Mastodon post created, id={response['id']}")
         except Exception as e:
             print(f"Failed to post to Mastodon: {e}")
-
-        _maybe_refresh_threads_token()
 
         try:
             response = threads_post(post_text)
