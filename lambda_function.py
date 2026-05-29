@@ -78,21 +78,27 @@ def _refresh_threads_token() -> None:
         params={"grant_type": "th_refresh_token", "access_token": token},
         timeout=10,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(f"Threads token refresh failed: HTTP {resp.status_code}")
     new_token = resp.json()["access_token"]
-
-    client = boto3.client("secretsmanager")
-    secret = client.get_secret_value(SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"])
-    data = json.loads(secret["SecretString"])
-    data["THREADS_ACCESS_TOKEN"] = new_token
-    data["THREADS_TOKEN_LAST_REFRESHED"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    client.put_secret_value(
-        SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
-        SecretString=json.dumps(data),
-    )
+    refreshed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     os.environ["THREADS_ACCESS_TOKEN"] = new_token
-    os.environ["THREADS_TOKEN_LAST_REFRESHED"] = data["THREADS_TOKEN_LAST_REFRESHED"]
+    os.environ["THREADS_TOKEN_LAST_REFRESHED"] = refreshed_at
+
+    try:
+        client = boto3.client("secretsmanager")
+        secret = client.get_secret_value(SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"])
+        data = json.loads(secret["SecretString"])
+        data["THREADS_ACCESS_TOKEN"] = new_token
+        data["THREADS_TOKEN_LAST_REFRESHED"] = refreshed_at
+        client.put_secret_value(
+            SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
+            SecretString=json.dumps(data),
+        )
+    except Exception as e:
+        print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}")
+
     print("Threads token refreshed")
 
 
