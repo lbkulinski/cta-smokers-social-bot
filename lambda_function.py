@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 import boto3
 import requests
 
@@ -67,6 +68,46 @@ def threads_post(text: str) -> dict:
     return publish.json()
 
 
+_THREADS_REFRESH_THRESHOLD_DAYS = 50
+
+
+def _refresh_threads_token() -> None:
+    token = os.environ["THREADS_ACCESS_TOKEN"]
+    resp = requests.get(
+        "https://graph.threads.net/refresh_access_token",
+        params={"grant_type": "th_refresh_token", "access_token": token},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    new_token = resp.json()["access_token"]
+
+    client = boto3.client("secretsmanager")
+    secret = client.get_secret_value(SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"])
+    data = json.loads(secret["SecretString"])
+    data["THREADS_ACCESS_TOKEN"] = new_token
+    data["THREADS_TOKEN_LAST_REFRESHED"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    client.put_secret_value(
+        SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
+        SecretString=json.dumps(data),
+    )
+
+    os.environ["THREADS_ACCESS_TOKEN"] = new_token
+    print("Threads token refreshed")
+
+
+def _maybe_refresh_threads_token() -> None:
+    last_refreshed = os.environ.get("THREADS_TOKEN_LAST_REFRESHED")
+    if last_refreshed:
+        last_dt = datetime.datetime.fromisoformat(last_refreshed)
+        age = datetime.datetime.now(datetime.timezone.utc) - last_dt
+        if age.days < _THREADS_REFRESH_THRESHOLD_DAYS:
+            return
+    try:
+        _refresh_threads_token()
+    except Exception as e:
+        print(f"Warning: could not refresh Threads token: {e}")
+
+
 def mastodon_post(text: str) -> dict:
     resp = requests.post(
         "https://mastodon.social/api/v1/statuses",
@@ -99,7 +140,7 @@ def bluesky_post(text: str) -> dict:
             "record": {
                 "$type": "app.bsky.feed.post",
                 "text": text,
-                "createdAt": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         },
         timeout=10,
@@ -203,6 +244,8 @@ def lambda_handler(event, context):
             print(f"Mastodon post created, id={response['id']}")
         except Exception as e:
             print(f"Failed to post to Mastodon: {e}")
+
+        _maybe_refresh_threads_token()
 
         try:
             response = threads_post(post_text)
