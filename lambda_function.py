@@ -92,16 +92,22 @@ def _refresh_threads_token() -> None:
     )
 
     os.environ["THREADS_ACCESS_TOKEN"] = new_token
+    os.environ["THREADS_TOKEN_LAST_REFRESHED"] = data["THREADS_TOKEN_LAST_REFRESHED"]
     print("Threads token refreshed")
 
 
 def _maybe_refresh_threads_token() -> None:
     last_refreshed = os.environ.get("THREADS_TOKEN_LAST_REFRESHED")
     if last_refreshed:
-        last_dt = datetime.datetime.fromisoformat(last_refreshed)
-        age = datetime.datetime.now(datetime.timezone.utc) - last_dt
-        if age.days < _THREADS_REFRESH_THRESHOLD_DAYS:
-            return
+        try:
+            last_dt = datetime.datetime.fromisoformat(last_refreshed.replace("Z", "+00:00"))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
+            age = datetime.datetime.now(datetime.timezone.utc) - last_dt
+            if age.days < _THREADS_REFRESH_THRESHOLD_DAYS:
+                return
+        except ValueError:
+            pass
     try:
         _refresh_threads_token()
     except Exception as e:
