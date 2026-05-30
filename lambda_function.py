@@ -1,5 +1,6 @@
 import os
 import json
+import datetime
 import boto3
 import requests
 
@@ -48,23 +49,84 @@ def threads_post(text: str) -> dict:
     user_id = os.environ["THREADS_USER_ID"]
     token = os.environ["THREADS_ACCESS_TOKEN"]
 
-    # Step 1: create media container
     container = requests.post(
         f"https://graph.threads.net/v1.0/{user_id}/threads",
         params={"media_type": "TEXT", "text": text, "access_token": token},
         timeout=10,
     )
-    container.raise_for_status()
+    if not container.ok:
+        raise RuntimeError(f"Threads container creation failed: HTTP {container.status_code}: {container.text[:200]}")
     container_id = container.json()["id"]
 
-    # Step 2: publish
     publish = requests.post(
         f"https://graph.threads.net/v1.0/{user_id}/threads_publish",
         params={"creation_id": container_id, "access_token": token},
         timeout=10,
     )
-    publish.raise_for_status()
+    if not publish.ok:
+        raise RuntimeError(f"Threads publish failed: HTTP {publish.status_code}: {publish.text[:200]}")
     return publish.json()
+
+
+_THREADS_REFRESH_THRESHOLD_DAYS = 50
+
+
+def _refresh_threads_token() -> None:
+    token = os.environ["THREADS_ACCESS_TOKEN"]
+    try:
+        resp = requests.get(
+            "https://graph.threads.net/refresh_access_token",
+            params={"grant_type": "th_refresh_token", "access_token": token},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        response = getattr(e, "response", None)
+        status = getattr(response, "status_code", None)
+        body = getattr(response, "text", "")[:200]
+        detail = f"HTTP {status}: {body}" if status else type(e).__name__
+        raise RuntimeError(f"Threads token refresh failed: {detail}") from None
+    new_token = resp.json()["access_token"]
+    refreshed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    os.environ["THREADS_ACCESS_TOKEN"] = new_token
+    os.environ["THREADS_TOKEN_LAST_REFRESHED"] = refreshed_at
+
+    try:
+        client = boto3.client("secretsmanager")
+        secret = client.get_secret_value(SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"])
+        data = json.loads(secret["SecretString"])
+        data["THREADS_ACCESS_TOKEN"] = new_token
+        data["THREADS_TOKEN_LAST_REFRESHED"] = refreshed_at
+        client.put_secret_value(
+            SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
+            SecretString=json.dumps(data),
+        )
+    except Exception as e:
+        print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}: {e}")
+
+    print("Threads token refreshed")
+
+
+def _maybe_refresh_threads_token() -> None:
+    last_refreshed = os.environ.get("THREADS_TOKEN_LAST_REFRESHED")
+    if last_refreshed:
+        try:
+            last_dt = datetime.datetime.fromisoformat(last_refreshed.replace("Z", "+00:00"))
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=datetime.timezone.utc)
+            age = datetime.datetime.now(datetime.timezone.utc) - last_dt
+            if age.days < _THREADS_REFRESH_THRESHOLD_DAYS:
+                return
+            print(f"Threads token is {age.days} days old, refreshing")
+        except ValueError:
+            print(f"Warning: could not parse THREADS_TOKEN_LAST_REFRESHED ({last_refreshed!r}), refreshing as a precaution")
+    else:
+        print("THREADS_TOKEN_LAST_REFRESHED not set, refreshing to establish baseline")
+    try:
+        _refresh_threads_token()
+    except Exception as e:
+        print(f"Warning: could not refresh Threads token: {e}")
 
 
 def mastodon_post(text: str) -> dict:
@@ -99,7 +161,7 @@ def bluesky_post(text: str) -> dict:
             "record": {
                 "$type": "app.bsky.feed.post",
                 "text": text,
-                "createdAt": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             },
         },
         timeout=10,
@@ -173,6 +235,8 @@ def build_post(report: dict) -> str:
 
 
 def lambda_handler(event, context):
+    _maybe_refresh_threads_token()
+
     for record in event.get("Records", []):
         if record.get("eventName") != "INSERT":
             continue
