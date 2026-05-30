@@ -1,6 +1,6 @@
 import os
 import json
-import uuid
+import hashlib
 import datetime
 import boto3
 import requests
@@ -100,7 +100,7 @@ def _refresh_threads_token() -> None:
         client.put_secret_value(
             SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
             SecretString=json.dumps(data),
-            ClientRequestToken=str(uuid.uuid4()),
+            ClientRequestToken=hashlib.sha256(refreshed_at.encode()).hexdigest(),
         )
     except Exception as e:
         print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}: {e}")
