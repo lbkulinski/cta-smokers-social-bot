@@ -50,22 +50,22 @@ def threads_post(text: str) -> dict:
     user_id = os.environ["THREADS_USER_ID"]
     token = os.environ["THREADS_ACCESS_TOKEN"]
 
-    # Step 1: create media container
     container = requests.post(
         f"https://graph.threads.net/v1.0/{user_id}/threads",
         params={"media_type": "TEXT", "text": text, "access_token": token},
         timeout=10,
     )
-    container.raise_for_status()
+    if not container.ok:
+        raise RuntimeError(f"Threads container creation failed: HTTP {container.status_code}")
     container_id = container.json()["id"]
 
-    # Step 2: publish
     publish = requests.post(
         f"https://graph.threads.net/v1.0/{user_id}/threads_publish",
         params={"creation_id": container_id, "access_token": token},
         timeout=10,
     )
-    publish.raise_for_status()
+    if not publish.ok:
+        raise RuntimeError(f"Threads publish failed: HTTP {publish.status_code}")
     return publish.json()
 
 
