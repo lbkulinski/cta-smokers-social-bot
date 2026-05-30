@@ -56,7 +56,7 @@ def threads_post(text: str) -> dict:
         timeout=10,
     )
     if not container.ok:
-        raise RuntimeError(f"Threads container creation failed: HTTP {container.status_code}")
+        raise RuntimeError(f"Threads container creation failed: HTTP {container.status_code}: {container.text[:200]}")
     container_id = container.json()["id"]
 
     publish = requests.post(
@@ -65,7 +65,7 @@ def threads_post(text: str) -> dict:
         timeout=10,
     )
     if not publish.ok:
-        raise RuntimeError(f"Threads publish failed: HTTP {publish.status_code}")
+        raise RuntimeError(f"Threads publish failed: HTTP {publish.status_code}: {publish.text[:200]}")
     return publish.json()
 
 
@@ -100,7 +100,7 @@ def _refresh_threads_token() -> None:
         client.put_secret_value(
             SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
             SecretString=json.dumps(data),
-            ClientRequestToken=hashlib.sha256(refreshed_at.encode()).hexdigest(),
+            ClientRequestToken=hashlib.sha256(f"{new_token}{refreshed_at}".encode()).hexdigest(),
         )
     except Exception as e:
         print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}: {e}")
