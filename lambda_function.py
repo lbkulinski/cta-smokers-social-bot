@@ -1,6 +1,5 @@
 import os
 import json
-import hashlib
 import datetime
 import boto3
 import requests
@@ -102,7 +101,6 @@ def _refresh_threads_token() -> None:
         client.put_secret_value(
             SecretId=os.environ["SECRETS_MANAGER_SECRET_ID"],
             SecretString=json.dumps(data),
-            ClientRequestToken=hashlib.sha256(f"{new_token}{refreshed_at}".encode()).hexdigest(),
         )
     except Exception as e:
         print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}: {e}")
@@ -120,8 +118,11 @@ def _maybe_refresh_threads_token() -> None:
             age = datetime.datetime.now(datetime.timezone.utc) - last_dt
             if age.days < _THREADS_REFRESH_THRESHOLD_DAYS:
                 return
+            print(f"Threads token is {age.days} days old, refreshing")
         except ValueError:
-            pass
+            print(f"Warning: could not parse THREADS_TOKEN_LAST_REFRESHED ({last_refreshed!r}), refreshing as a precaution")
+    else:
+        print("THREADS_TOKEN_LAST_REFRESHED not set, refreshing to establish baseline")
     try:
         _refresh_threads_token()
     except Exception as e:
