@@ -73,13 +73,17 @@ _THREADS_REFRESH_THRESHOLD_DAYS = 50
 
 def _refresh_threads_token() -> None:
     token = os.environ["THREADS_ACCESS_TOKEN"]
-    resp = requests.get(
-        "https://graph.threads.net/refresh_access_token",
-        params={"grant_type": "th_refresh_token", "access_token": token},
-        timeout=10,
-    )
-    if not resp.ok:
-        raise RuntimeError(f"Threads token refresh failed: HTTP {resp.status_code}")
+    try:
+        resp = requests.get(
+            "https://graph.threads.net/refresh_access_token",
+            params={"grant_type": "th_refresh_token", "access_token": token},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        detail = f"HTTP {status}" if status else type(e).__name__
+        raise RuntimeError(f"Threads token refresh failed: {detail}") from None
     new_token = resp.json()["access_token"]
     refreshed_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
