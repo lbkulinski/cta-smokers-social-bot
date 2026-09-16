@@ -188,10 +188,10 @@ CTA_STOPS_URL = os.environ["CTA_STOPS_URL"]
 LOOP_DESTINATION_ID = "0"
 
 
-def get_station_name(map_id: str) -> str:
+def get_station_name(map_id: str) -> str | None:
     if not _station_cache:
         _load_station_cache()
-    return _station_cache.get(str(map_id), f"station {map_id}")
+    return _station_cache.get(str(map_id))
 
 
 def _load_station_cache() -> None:
@@ -208,12 +208,14 @@ def _load_station_cache() -> None:
         print(f"Warning: could not load station cache: {e}")
 
 
-def build_post(report: dict) -> str:
+def build_post(report: dict) -> str | None:
     line_key = report.get("line", "")
     line_label = TRAIN_LINE_LABELS.get(line_key.upper(), line_key.title())
 
     next_station_id = report.get("nextStationId", "")
     station_name = get_station_name(next_station_id)
+    if station_name is None:
+        return None
 
     destination_id = report.get("destinationId")
     if destination_id == LOOP_DESTINATION_ID:
@@ -249,6 +251,9 @@ def lambda_handler(event, context):
         print(f"Processing report: {json.dumps(report)}")
 
         post_text = build_post(report)
+        if post_text is None:
+            print(f"Skipping report with unknown station: {json.dumps(report)}")
+            continue
 
         try:
             response = twitter_post(post_text)
