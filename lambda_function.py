@@ -279,6 +279,16 @@ def _release(receipt_key: str) -> None:
         print(f"Warning: could not release receipt {receipt_key}, a retry will skip this platform: {e}")
 
 
+def _describe_error(e: Exception) -> str:
+    """Error summary safe to log: exception type and HTTP status only.
+
+    requests puts the full URL in its messages, and some URLs are secrets
+    (Discord webhook, Threads access_token query param).
+    """
+    status = getattr(getattr(e, "response", None), "status_code", None)
+    return f"{type(e).__name__} (HTTP {status})" if status else type(e).__name__
+
+
 def _post_once(report_key_: str, platform: str, post_fn, describe, text: str) -> None:
     """Claim a receipt, then post. A crash after the claim drops a post but never duplicates one."""
     receipt_key = f"{report_key_}#{platform}"
@@ -289,7 +299,7 @@ def _post_once(report_key_: str, platform: str, post_fn, describe, text: str) ->
         response = post_fn(text)
         print(f"{platform} post created, {describe(response)}")
     except Exception as e:
-        print(f"Failed to post to {platform}: {e}")
+        print(f"Failed to post to {platform}: {_describe_error(e)}")
         _release(receipt_key)
 
 

@@ -256,6 +256,27 @@ class DedupeTests(HandlerTestCase):
         self.assertEqual(self.dynamo.put_calls, [])
 
 
+class ErrorLoggingTests(HandlerTestCase):
+    def test_failed_post_logs_status_but_not_url_or_secrets(self):
+        import contextlib
+        import io
+
+        import requests
+
+        secret_url = "https://discord.com/api/webhooks/123/SECRET-TOKEN"
+        resp = requests.Response()
+        resp.status_code = 401
+        resp.url = secret_url
+        err = requests.HTTPError(f"401 Client Error: Unauthorized for url: {secret_url}", response=resp)
+        self.posts["discord_post"].side_effect = err
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_handler(record("INSERT", new=image()))
+        logged = out.getvalue()
+        self.assertNotIn("SECRET-TOKEN", logged)
+        self.assertIn("Failed to post to discord: HTTPError (HTTP 401)", logged)
+
+
 class StationLookupTests(unittest.TestCase):
     def setUp(self):
         lf._station_cache.clear()
