@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Support the new reports table schema (`carNumberLine` key, `reportedAt`, no `date`/`reportId`)
+- MODIFY events with a changed `reportedAt` are treated as new reports; unchanged MODIFY and all REMOVE events are ignored
+- Records with missing or malformed `reportedAt` are skipped; one bad record no longer fails the batch
+
+- Station names are read from the DynamoDB stations table (`STATIONS_TABLE_NAME`) instead of the Chicago Data Portal; `CTA_STOPS_URL` is no longer used
+
+### Added
+
+- Per-platform dedupe receipts (`DEDUPE_TABLE_NAME`): claimed before posting, released if the post fails; a dedupe table error fails the batch so it is retried
+- Unit tests (`python -m unittest discover -s tests`), run in CI
+- Dependabot for pip and GitHub Actions
+
 ## [1.2.0] - 2026-03-25
 
 ### Fixed

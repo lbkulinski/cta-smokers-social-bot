@@ -3,6 +3,7 @@ import json
 import datetime
 import boto3
 import requests
+from botocore.exceptions import ClientError
 
 def _load_secrets() -> None:
     client = boto3.client("secretsmanager")
@@ -169,7 +170,7 @@ def bluesky_post(text: str) -> dict:
     resp.raise_for_status()
     return resp.json()
 
-# --- Station name cache (populated once at cold start) ---
+# --- Station name cache (filled on demand, per container) ---
 _station_cache: dict[str, str] = {}
 
 TRAIN_LINE_LABELS = {
@@ -183,29 +184,36 @@ TRAIN_LINE_LABELS = {
     "YELLOW": "Yellow",
 }
 
-CTA_STOPS_URL = os.environ["CTA_STOPS_URL"]
-
 LOOP_DESTINATION_ID = "0"
 
 
 def get_station_name(map_id: str) -> str | None:
-    if not _station_cache:
-        _load_station_cache()
-    return _station_cache.get(str(map_id))
-
-
-def _load_station_cache() -> None:
+    """Look up a station name by map ID (the stations table's partition key), caching hits."""
+    map_id = str(map_id)
+    if map_id in _station_cache:
+        return _station_cache[map_id]
     try:
-        resp = requests.get(CTA_STOPS_URL, params={"$limit": 10000}, timeout=10)
-        resp.raise_for_status()
-        for stop in resp.json():
-            mid = stop.get("map_id")
-            name = stop.get("station_name")
-            if mid and name:
-                _station_cache[str(mid)] = name
-        print(f"Loaded {len(_station_cache)} stations into cache")
+        # Every stop under a mapId carries the same station name, so one item is enough.
+        page = _dynamodb().query(
+            TableName=os.environ["STATIONS_TABLE_NAME"],
+            KeyConditionExpression="mapId = :m",
+            ExpressionAttributeValues={":m": {"S": map_id}},
+            ProjectionExpression="#n",
+            ExpressionAttributeNames={"#n": "name"},
+            Limit=1,
+        )
     except Exception as e:
-        print(f"Warning: could not load station cache: {e}")
+        print(f"Warning: could not look up station {map_id}: {e}")
+        return None
+    items = page.get("Items", [])
+    name = items[0].get("name", {}).get("S") if items else None
+    if name:
+        _station_cache[map_id] = name
+    return name
+
+
+def _dynamodb():
+    return boto3.client("dynamodb")
 
 
 def build_post(report: dict) -> str | None:
@@ -218,7 +226,7 @@ def build_post(report: dict) -> str | None:
         return None
 
     destination_id = report.get("destinationId")
-    if destination_id == LOOP_DESTINATION_ID:
+    if str(destination_id) == LOOP_DESTINATION_ID:
         destination_name = "Loop"
     elif destination_id:
         destination_name = get_station_name(destination_id)
@@ -236,54 +244,131 @@ def build_post(report: dict) -> str | None:
     return post
 
 
+class DedupeUnavailable(Exception):
+    """The dedupe table could not be used. Raised so the batch is retried rather than risk a duplicate."""
+
+
+_RECEIPT_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def _claim(receipt_key: str) -> bool:
+    """Atomically record that this report/platform is being posted. False if already claimed."""
+    ttl = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) + _RECEIPT_TTL_SECONDS
+    try:
+        _dynamodb().put_item(
+            TableName=os.environ["DEDUPE_TABLE_NAME"],
+            Item={"reportKey": {"S": receipt_key}, "ttl": {"N": str(ttl)}},
+            ConditionExpression="attribute_not_exists(reportKey)",
+        )
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise DedupeUnavailable(f"{type(e).__name__}: {e}") from e
+    except Exception as e:
+        raise DedupeUnavailable(f"{type(e).__name__}: {e}") from e
+
+
+def _release(receipt_key: str) -> None:
+    try:
+        _dynamodb().delete_item(
+            TableName=os.environ["DEDUPE_TABLE_NAME"],
+            Key={"reportKey": {"S": receipt_key}},
+        )
+    except Exception as e:
+        print(f"Warning: could not release receipt {receipt_key}, a retry will skip this platform: {e}")
+
+
+def _post_once(report_key_: str, platform: str, post_fn, describe, text: str) -> None:
+    """Claim a receipt, then post. A crash after the claim drops a post but never duplicates one."""
+    receipt_key = f"{report_key_}#{platform}"
+    if not _claim(receipt_key):
+        print(f"Skipping {platform}: already posted {receipt_key}")
+        return
+    try:
+        response = post_fn(text)
+        print(f"{platform} post created, {describe(response)}")
+    except Exception as e:
+        print(f"Failed to post to {platform}: {e}")
+        _release(receipt_key)
+
+
+def _parse_reported_at(report: dict) -> datetime.datetime | None:
+    """Return reportedAt as an aware datetime, or None if missing or malformed."""
+    value = report.get("reportedAt")
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed
+
+
+def report_key(report: dict) -> str:
+    """Stable identifier for a report: carNumberLine plus reportedAt."""
+    return f"{report.get('carNumberLine')}#{report.get('reportedAt')}"
+
+
+def _is_new_report(record: dict) -> bool:
+    """INSERT is new. MODIFY is new only when reportedAt changed. REMOVE (TTL or manual) never is."""
+    event_name = record.get("eventName")
+    ddb = record.get("dynamodb", {})
+    if event_name == "INSERT":
+        return True
+    if event_name == "MODIFY":
+        new_reported_at = ddb.get("NewImage", {}).get("reportedAt")
+        old_reported_at = ddb.get("OldImage", {}).get("reportedAt")
+        return new_reported_at != old_reported_at
+    return False
+
+
+def _process_record(record: dict) -> None:
+    if not _is_new_report(record):
+        return
+
+    new_image = record.get("dynamodb", {}).get("NewImage", {})
+    if not new_image:
+        return
+
+    report = deserialize_dynamo_image(new_image)
+    if _parse_reported_at(report) is None:
+        print(f"Skipping report with missing or malformed reportedAt: {json.dumps(report)}")
+        return
+
+    key = report_key(report)
+    print(f"Processing report {key}: {json.dumps(report)}")
+
+    post_text = build_post(report)
+    if post_text is None:
+        print(f"Skipping report {key} with unknown station: {json.dumps(report)}")
+        return
+
+    platforms = [
+        ("twitter", twitter_post, lambda r: f"id={r['data']['id']}"),
+        ("bluesky", bluesky_post, lambda r: f"uri={r['uri']}"),
+        ("mastodon", mastodon_post, lambda r: f"id={r['id']}"),
+        ("threads", threads_post, lambda r: f"id={r['id']}"),
+        ("discord", discord_post, lambda r: ""),
+    ]
+    for platform, post_fn, describe in platforms:
+        _post_once(key, platform, post_fn, describe, post_text)
+
+
 def lambda_handler(event, context):
     _maybe_refresh_threads_token()
 
     for record in event.get("Records", []):
-        if record.get("eventName") != "INSERT":
-            continue
-
-        new_image = record.get("dynamodb", {}).get("NewImage", {})
-        if not new_image:
-            continue
-
-        report = deserialize_dynamo_image(new_image)
-        print(f"Processing report: {json.dumps(report)}")
-
-        post_text = build_post(report)
-        if post_text is None:
-            print(f"Skipping report with unknown station: {json.dumps(report)}")
-            continue
-
+        # One bad record must not fail the batch: a failed invocation is retried
+        # in full, which would re-post records that already succeeded.
         try:
-            response = twitter_post(post_text)
-            print(f"Twitter post created, id={response['data']['id']}")
+            _process_record(record)
+        except DedupeUnavailable:
+            raise
         except Exception as e:
-            print(f"Failed to post to Twitter: {e}")
-
-        try:
-            response = bluesky_post(post_text)
-            print(f"Bluesky post created, uri={response['uri']}")
-        except Exception as e:
-            print(f"Failed to post to Bluesky: {e}")
-
-        try:
-            response = mastodon_post(post_text)
-            print(f"Mastodon post created, id={response['id']}")
-        except Exception as e:
-            print(f"Failed to post to Mastodon: {e}")
-
-        try:
-            response = threads_post(post_text)
-            print(f"Threads post created, id={response['id']}")
-        except Exception as e:
-            print(f"Failed to post to Threads: {e}")
-
-        try:
-            discord_post(post_text)
-            print("Discord post created")
-        except Exception as e:
-            print(f"Failed to post to Discord: {e}")
+            print(f"Skipping record after unexpected error: {type(e).__name__}: {e}")
 
 
 def deserialize_dynamo_image(image: dict) -> dict:

@@ -4,10 +4,10 @@ An AWS Lambda bot that automatically posts reports of smoking incidents on Chica
 
 ## How It Works
 
-The bot is triggered by [DynamoDB Streams](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html) whenever a new smoking incident is inserted into the incidents table. For each new record, it:
+The bot is triggered by [DynamoDB Streams](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html) whenever a new smoking report is written to the reports table (one item per car number and line, keyed by `carNumberLine`). A new report is an `INSERT`, or a `MODIFY` whose `reportedAt` differs from the old image's (a resubmit over an expired item). `REMOVE` events (TTL or manual) are ignored. Records with a missing or malformed `reportedAt` are skipped. For each new report, it:
 
 1. Deserializes the DynamoDB event payload
-2. Looks up the station name from the [Chicago Data Portal](https://data.cityofchicago.org/resource/8pix-ypme.json)
+2. Looks up the station name by map ID in the CTA train stations DynamoDB table
 3. Formats a post with line, destination, next stop, car number, and run number
 4. Publishes the post to all four social platforms concurrently
 
@@ -16,9 +16,10 @@ A failure on any single platform does not block the others.
 ## Architecture
 
 - **Compute:** AWS Lambda (Python 3)
-- **Trigger:** DynamoDB Streams (INSERT events)
+- **Trigger:** DynamoDB Streams (`NEW_AND_OLD_IMAGES`; INSERT and MODIFY events must reach the function)
 - **Secrets:** AWS Secrets Manager
-- **Station data:** Chicago Data Portal CTA Stops API (cached at cold start)
+- **Station data:** DynamoDB stations table (`mapId` partition key), queried per station and cached per container
+- **Dedupe:** DynamoDB receipts table; one conditional put per report and platform before posting
 
 ## Supported Lines
 
@@ -40,7 +41,8 @@ The following environment variables must be set on the Lambda function:
 | Key | Description |
 |-----|-------------|
 | `SECRETS_MANAGER_SECRET_ID` | AWS Secrets Manager secret ID containing API credentials |
-| `CTA_STOPS_URL` | Chicago Data Portal CTA Stops API URL |
+| `STATIONS_TABLE_NAME` | DynamoDB stations table (partition key `mapId`, sort key `stopId`, attribute `name`); needs `dynamodb:Query` |
+| `DEDUPE_TABLE_NAME` | Receipts table (`reportKey` S partition key, TTL attribute `ttl`); needs `dynamodb:PutItem` and `dynamodb:DeleteItem` |
 
 ### Secrets
 
