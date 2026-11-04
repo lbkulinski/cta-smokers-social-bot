@@ -13,6 +13,8 @@ The bot is triggered by [DynamoDB Streams](https://docs.aws.amazon.com/amazondyn
 
 A failure on any single platform does not block the others.
 
+The handler uses [partial batch responses](https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-batchfailurereporting.html): if the dedupe table is unavailable it returns that record's sequence number in `batchItemFailures` and stops, so Lambda retries from there. The event source mapping must set `FunctionResponseTypes` to `["ReportBatchItemFailures"]`.
+
 ## Architecture
 
 - **Compute:** AWS Lambda (Python 3)

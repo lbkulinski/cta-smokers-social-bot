@@ -368,6 +368,11 @@ def _process_record(record: dict) -> None:
 
 
 def lambda_handler(event, context):
+    """Process stream records, reporting partial batch failures.
+
+    Needs ReportBatchItemFailures in the event source mapping's FunctionResponseTypes,
+    otherwise Lambda ignores the response and treats the batch as successful.
+    """
     _maybe_refresh_threads_token()
 
     for record in event.get("Records", []):
@@ -375,10 +380,18 @@ def lambda_handler(event, context):
         # in full, which would re-post records that already succeeded.
         try:
             _process_record(record)
-        except DedupeUnavailable:
-            raise
+        except DedupeUnavailable as e:
+            sequence_number = record.get("dynamodb", {}).get("SequenceNumber")
+            if not sequence_number:
+                raise
+            # Stop here: Lambda retries from this record onward. Earlier records are done,
+            # and receipts keep any replay from re-posting.
+            print(f"Dedupe table unavailable, retrying from sequence {sequence_number}: {e}")
+            return {"batchItemFailures": [{"itemIdentifier": sequence_number}]}
         except Exception as e:
             print(f"Skipping record after unexpected error: {type(e).__name__}: {e}")
+
+    return {"batchItemFailures": []}
 
 
 def deserialize_dynamo_image(image: dict) -> dict:

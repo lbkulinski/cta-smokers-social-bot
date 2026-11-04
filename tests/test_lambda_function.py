@@ -74,8 +74,11 @@ def image(reported_at=REPORTED_AT, car="2435", line="RED", dest="30173", next_st
     return img
 
 
-def record(event_name, new=None, old=None, principal=None):
-    ddb = {}
+_seq = iter(range(1000, 10**6))
+
+
+def record(event_name, new=None, old=None, principal=None, seq=None):
+    ddb = {"SequenceNumber": str(seq if seq is not None else next(_seq))}
     if new is not None:
         ddb["NewImage"] = new
     if old is not None:
@@ -193,7 +196,7 @@ class MalformedReportedAtTests(HandlerTestCase):
             record("INSERT", new={}),
             record("INSERT", new=image(car="7109", line="BLUE", dest="30173")),
         )
-        self.assertIsNone(result)
+        self.assertEqual(result, {"batchItemFailures": []})
         self.assert_posted(1)
 
     def test_unexpected_error_in_one_record_does_not_fail_batch(self):
@@ -244,10 +247,29 @@ class DedupeTests(HandlerTestCase):
             if name != "bluesky_post":
                 self.assertEqual(self.posts[name].call_count, 1, name)
 
-    def test_dedupe_table_error_fails_batch_without_posting(self):
-        self.dynamo.fail_put = ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "PutItem")
+    def test_dedupe_error_reports_that_record_and_stops(self):
+        ok = record("INSERT", new=image(car="1111"), seq=10)
+        bad = record("INSERT", new=image(car="2222"), seq=11)
+        after = record("INSERT", new=image(car="3333"), seq=12)
+        real_put = self.dynamo.put_item
+
+        def put(**kw):
+            if "2222#RED" in kw["Item"]["reportKey"]["S"]:
+                raise ClientError({"Error": {"Code": "ProvisionedThroughputExceededException"}}, "PutItem")
+            return real_put(**kw)
+
+        self.dynamo.put_item = put
+        result = self.run_handler(ok, bad, after)
+        self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "11"}]})
+        self.assertEqual(self.posts["twitter_post"].call_count, 1)  # only the first record
+        self.assertFalse(any("3333" in k for k in self.dynamo.receipts))
+
+    def test_dedupe_error_without_sequence_number_fails_whole_batch(self):
+        self.dynamo.fail_put = ClientError({"Error": {"Code": "InternalServerError"}}, "PutItem")
+        rec = record("INSERT", new=image())
+        del rec["dynamodb"]["SequenceNumber"]
         with self.assertRaises(lf.DedupeUnavailable):
-            self.run_handler(record("INSERT", new=image()))
+            self.run_handler(rec)
         self.assert_posted(0)
 
     def test_unknown_station_does_not_claim_receipts(self):
