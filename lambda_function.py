@@ -284,7 +284,7 @@ def _release(receipt_key: str) -> None:
             Key={"reportKey": {"S": receipt_key}},
         )
     except Exception as e:
-        print(f"Warning: could not release receipt {receipt_key}, a retry will skip this platform: {e}")
+        print(f"ERROR: could not release receipt {receipt_key}, a retry will skip this platform: {type(e).__name__}")
 
 
 def _describe_error(e: Exception) -> str:

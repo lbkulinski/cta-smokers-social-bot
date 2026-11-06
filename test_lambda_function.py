@@ -268,6 +268,17 @@ class DedupeTests(HandlerTestCase):
             self.run_handler(rec)
         self.assert_posted(0)
 
+    def test_failed_release_is_logged_as_error(self):
+        import contextlib
+        import io
+
+        self.posts["bluesky_post"].side_effect = RuntimeError("down")
+        self.dynamo.delete_item = mock.Mock(side_effect=RuntimeError("denied"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_handler(record("INSERT", new=image()))
+        self.assertIn("ERROR: could not release receipt", out.getvalue())
+
     def test_unparseable_response_does_not_release_receipt_or_repost(self):
         self.posts["twitter_post"].return_value = {}  # describe() expects r["data"]["id"]
         rec = record("INSERT", new=image())
