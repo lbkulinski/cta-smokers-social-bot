@@ -44,7 +44,7 @@ The following environment variables must be set on the Lambda function:
 |-----|-------------|
 | `SECRETS_MANAGER_SECRET_ID` | AWS Secrets Manager secret ID containing API credentials |
 | `STATIONS_TABLE_NAME` | DynamoDB stations table (partition key `mapId`, sort key `stopId`, attribute `name`); needs `dynamodb:Query` |
-| `DEDUPE_TABLE_NAME` | Receipts table (`reportKey` S partition key, TTL attribute `ttl`); needs `dynamodb:PutItem` and `dynamodb:DeleteItem` |
+| `PROCESSED_REPORTS_TABLE_NAME` | Receipts table (`reportKey` S partition key, TTL attribute `ttl`); needs `dynamodb:PutItem` and `dynamodb:DeleteItem` |
 
 ### Secrets
 
@@ -68,11 +68,18 @@ Dependencies are listed in `requirements.txt`. Build the deployment package:
 
 ```bash
 pip install -r requirements.txt -t package/
+cp lambda_function.py package/
 cd package && zip -r ../lambda.zip . && cd ..
-zip lambda.zip lambda_function.py
 ```
 
-Upload `lambda.zip` to your Lambda function.
+Pushes to `main` run CI and then deploy automatically (see `.github/workflows/`).
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## Post Format
 

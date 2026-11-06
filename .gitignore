@@ -1,6 +1,10 @@
-lambda.zip
-package/
-lambda/
-.idea/
 __pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.zip
+.idea/
 .DS_Store
+.claude/settings.local.json
+lambda/
+package/

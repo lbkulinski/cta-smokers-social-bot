@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dedupe table env var is `PROCESSED_REPORTS_TABLE_NAME`, matching the aggregates and submitter consumers (each still points at its own table)
+- CI/CD aligned with `cta-smoking-report-aggregates`: `ci.yml` (ruff + pytest, reusable), deploy gated on CI in a `production` environment, actions pinned to commit SHAs, AWS role/region/function name read from repo **variables** instead of secrets (**action required:** create `AWS_ROLE_ARN`, `AWS_REGION` and `LAMBDA_FUNCTION_NAME` as repository variables and a `production` environment)
+- Tests moved to pytest at the repo root; added `requirements-dev.txt`; Dependabot now covers `pip` and `github-actions`
 - Support the new reports table schema (`carNumberLine` key, `reportedAt`, no `date`/`reportId`)
 - MODIFY events with a changed `reportedAt` are treated as new reports; unchanged MODIFY and all REMOVE events are ignored
 - Records with missing or malformed `reportedAt` are skipped; one bad record no longer fails the batch
@@ -17,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Per-platform dedupe receipts (`DEDUPE_TABLE_NAME`): claimed before posting, released if the post fails; a dedupe table error is reported via `batchItemFailures` (requires `ReportBatchItemFailures` on the event source mapping) so Lambda retries from that record
+- Per-platform dedupe receipts (`PROCESSED_REPORTS_TABLE_NAME`): claimed before posting, released if the post fails; a dedupe table error is reported via `batchItemFailures` (requires `ReportBatchItemFailures` on the event source mapping) so Lambda retries from that record
 - Unit tests (`python -m unittest discover -s tests`), run in CI
 - Dependabot for pip and GitHub Actions
 

@@ -256,7 +256,7 @@ def _claim(receipt_key: str) -> bool:
     ttl = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) + _RECEIPT_TTL_SECONDS
     try:
         _dynamodb().put_item(
-            TableName=os.environ["DEDUPE_TABLE_NAME"],
+            TableName=os.environ["PROCESSED_REPORTS_TABLE_NAME"],
             Item={"reportKey": {"S": receipt_key}, "ttl": {"N": str(ttl)}},
             ConditionExpression="attribute_not_exists(reportKey)",
         )
@@ -272,7 +272,7 @@ def _claim(receipt_key: str) -> bool:
 def _release(receipt_key: str) -> None:
     try:
         _dynamodb().delete_item(
-            TableName=os.environ["DEDUPE_TABLE_NAME"],
+            TableName=os.environ["PROCESSED_REPORTS_TABLE_NAME"],
             Key={"reportKey": {"S": receipt_key}},
         )
     except Exception as e:

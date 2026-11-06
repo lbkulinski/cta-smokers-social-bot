@@ -1,15 +1,11 @@
 import os
-import sys
 import unittest
 from unittest import mock
 
 from botocore.exceptions import ClientError
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
 os.environ.setdefault("STATIONS_TABLE_NAME", "cta-train-stations")
-os.environ.setdefault("DEDUPE_TABLE_NAME", "processed-cta-smoking-posts")
+os.environ.setdefault("PROCESSED_REPORTS_TABLE_NAME", "processed-cta-smoking-posts")
 os.environ.setdefault("SECRETS_MANAGER_SECRET_ID", "test-secret")
 
 # The module loads secrets from Secrets Manager at import time; stub boto3 for that.
