@@ -15,6 +15,10 @@ A failure on any single platform does not block the others.
 
 The handler uses [partial batch responses](https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-batchfailurereporting.html): if the dedupe table is unavailable it returns that record's sequence number in `batchItemFailures` and stops, so Lambda retries from there. The event source mapping must set `FunctionResponseTypes` to `["ReportBatchItemFailures"]`.
 
+### Delivery guarantees
+
+Stream delivery is at least once, so the function claims a receipt before acting. This favors skipping over duplicating: a report is never acted on twice, but it can be skipped if the function is killed between the claim and the action, or if releasing the receipt after a failed action also fails. Receipts expire after 7 days. This is an accepted trade-off.
+
 ## Architecture
 
 - **Compute:** AWS Lambda (Python 3)
