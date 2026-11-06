@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- MIT `LICENSE`
 - Per-platform dedupe receipts (`PROCESSED_REPORTS_TABLE_NAME`): claimed before posting, released if the post fails; a dedupe table error is reported via `batchItemFailures` (requires `ReportBatchItemFailures` on the event source mapping) so Lambda retries from that record
 - Unit tests (`python -m unittest discover -s tests`), run in CI
 - Dependabot for pip and GitHub Actions

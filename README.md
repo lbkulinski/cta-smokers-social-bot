@@ -98,3 +98,7 @@ Run number is optional and omitted when unavailable:
 Next Stop: Pulaski
 Car: 7109
 ```
+
+## License
+
+[MIT](LICENSE)
