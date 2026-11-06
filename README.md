@@ -61,6 +61,8 @@ The following credentials must be present in the Secrets Manager secret:
 | `THREADS_USER_ID` | Threads/Meta user ID |
 | `THREADS_ACCESS_TOKEN` | Threads access token |
 | `MASTODON_ACCESS_TOKEN` | Mastodon access token |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL |
+| `THREADS_TOKEN_LAST_REFRESHED` | Optional. ISO-8601 time the Threads token was last refreshed. The function sets it itself when it refreshes the token (and writes the new token back to the secret, so the role also needs `secretsmanager:PutSecretValue`) |
 
 ## Deployment
 
@@ -72,14 +74,27 @@ cp lambda_function.py package/
 cd package && zip -r ../lambda.zip . && cd ..
 ```
 
-Pushes to `main` run CI and then deploy automatically (see `.github/workflows/`).
-
 ## Tests
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
+
+## CI/CD
+
+- `.github/workflows/ci.yml` runs `ruff` and `pytest` on pull requests to `main` (Python 3.12).
+- `.github/workflows/deploy.yml` runs CI (lint and tests), then updates the Lambda's code (dependencies from `requirements.txt` are bundled into `lambda.zip`). It runs on every push to `main` and can also be run manually. It only updates code; environment variables, tables, IAM and the event source mapping are managed elsewhere.
+- `.github/dependabot.yml` checks the Python dependencies and the workflow actions weekly.
+
+Deploy setup (repository settings):
+
+| Kind | Name | Description |
+|---|---|---|
+| Variable | `AWS_ROLE_ARN` | IAM role GitHub assumes via OIDC. Needs `lambda:UpdateFunctionCode` and `lambda:GetFunctionConfiguration` on the function (the latter is used by the post-deploy `aws lambda wait function-updated` step). Because the deploy job runs in the `production` environment, the role's trust policy must allow the subject `repo:lbkulinski/cta-smokers-social-bot:environment:production` |
+| Variable | `AWS_REGION` | Region of the Lambda |
+| Variable | `LAMBDA_FUNCTION_NAME` | Name of the Lambda function |
+| Environment | `production` | The deploy job runs in this environment. Optionally add required reviewers as an approval gate |
 
 ## Post Format
 

@@ -332,7 +332,3 @@ class ReportIdTests(unittest.TestCase):
     def test_report_key_is_car_number_line_plus_reported_at(self):
         report = lf.deserialize_dynamo_image(image())
         self.assertEqual(lf.report_key(report), f"2435#RED#{REPORTED_AT}")
-
-
-if __name__ == "__main__":
-    unittest.main()
