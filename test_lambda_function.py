@@ -268,6 +268,22 @@ class DedupeTests(HandlerTestCase):
             self.run_handler(rec)
         self.assert_posted(0)
 
+    def test_unparseable_response_does_not_release_receipt_or_repost(self):
+        self.posts["twitter_post"].return_value = {}  # describe() expects r["data"]["id"]
+        rec = record("INSERT", new=image())
+        self.run_handler(rec)
+        self.assertEqual(self.dynamo.deleted, [])
+        self.run_handler(rec)
+        self.assertEqual(self.posts["twitter_post"].call_count, 1)
+
+    def test_station_lookup_failure_reports_record_for_retry_without_claiming(self):
+        lf._station_cache.clear()
+        with mock.patch.object(lf, "get_station_name", side_effect=lf.StationLookupUnavailable("down")):
+            result = self.run_handler(record("INSERT", new=image(), seq=21))
+        self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "21"}]})
+        self.assertEqual(self.dynamo.put_calls, [])
+        self.assert_posted(0)
+
     def test_unknown_station_does_not_claim_receipts(self):
         lf._station_cache.clear()
         self.run_handler(record("INSERT", new=image()))
@@ -323,8 +339,9 @@ class StationLookupTests(unittest.TestCase):
     def test_unknown_map_id_returns_none(self):
         self.assertIsNone(self.lookup(FakeDynamo(), "99999"))
 
-    def test_query_failure_returns_none_and_is_not_cached(self):
-        self.assertIsNone(self.lookup(FakeDynamo(stations=RuntimeError("denied")), "41090"))
+    def test_query_failure_raises_and_is_not_cached(self):
+        with self.assertRaises(lf.StationLookupUnavailable):
+            self.lookup(FakeDynamo(stations=RuntimeError("denied")), "41090")
         self.assertEqual(self.lookup(FakeDynamo(stations={"41090": "Monroe"}), "41090"), "Monroe")
 
 

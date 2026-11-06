@@ -184,6 +184,18 @@ TRAIN_LINE_LABELS = {
     "YELLOW": "Yellow",
 }
 
+class RetryableError(Exception):
+    """A dependency failed. Raised so Lambda retries the record instead of dropping or duplicating it."""
+
+
+class DedupeUnavailable(RetryableError):
+    """The dedupe table could not be used. Raised so the batch is retried rather than risk a duplicate."""
+
+
+class StationLookupUnavailable(RetryableError):
+    """The stations table could not be queried. Raised so the batch is retried rather than drop the report."""
+
+
 LOOP_DESTINATION_ID = "0"
 
 
@@ -203,8 +215,8 @@ def get_station_name(map_id: str) -> str | None:
             Limit=1,
         )
     except Exception as e:
-        print(f"Warning: could not look up station {map_id}: {e}")
-        return None
+        # A failed lookup is not an unknown station: raise so the record is retried, not dropped.
+        raise StationLookupUnavailable(f"station {map_id}: {type(e).__name__}: {e}") from e
     items = page.get("Items", [])
     name = items[0].get("name", {}).get("S") if items else None
     if name:
@@ -242,10 +254,6 @@ def build_post(report: dict) -> str | None:
         post += f" · Run: {run_number}"
 
     return post
-
-
-class DedupeUnavailable(Exception):
-    """The dedupe table could not be used. Raised so the batch is retried rather than risk a duplicate."""
 
 
 _RECEIPT_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -297,10 +305,16 @@ def _post_once(report_key_: str, platform: str, post_fn, describe, text: str) ->
         return
     try:
         response = post_fn(text)
-        print(f"{platform} post created, {describe(response)}")
     except Exception as e:
         print(f"Failed to post to {platform}: {_describe_error(e)}")
         _release(receipt_key)
+        return
+    # The post succeeded: never release the receipt past this point, or a retry would repost.
+    try:
+        detail = describe(response)
+    except Exception:
+        detail = "response details unavailable"
+    print(f"{platform} post created, {detail}")
 
 
 def _parse_reported_at(report: dict) -> datetime.datetime | None:
@@ -380,13 +394,13 @@ def lambda_handler(event, context):
         # in full, which would re-post records that already succeeded.
         try:
             _process_record(record)
-        except DedupeUnavailable as e:
+        except RetryableError as e:
             sequence_number = record.get("dynamodb", {}).get("SequenceNumber")
             if not sequence_number:
                 raise
             # Stop here: Lambda retries from this record onward. Earlier records are done,
             # and receipts keep any replay from re-posting.
-            print(f"Dedupe table unavailable, retrying from sequence {sequence_number}: {e}")
+            print(f"Dependency unavailable, retrying from sequence {sequence_number}: {e}")
             return {"batchItemFailures": [{"itemIdentifier": sequence_number}]}
         except Exception as e:
             print(f"Skipping record after unexpected error: {type(e).__name__}: {e}")
