@@ -17,7 +17,7 @@ The handler uses [partial batch responses](https://docs.aws.amazon.com/lambda/la
 
 ### Delivery guarantees
 
-Stream delivery is at least once, so the function claims a receipt before acting. This favors skipping over duplicating: a report is never acted on twice, but it can be skipped if the function is killed between the claim and the action, or if releasing the receipt after a failed action also fails. Receipts expire after 7 days. This is an accepted trade-off.
+Stream delivery is at least once, so the function claims a receipt before acting. This favors skipping over duplicating: a report is not acted on twice, with one exception: if a request succeeds but its response is lost (for example a timeout), the call is treated as failed, the receipt is released, and the retry repeats it. A report can also be skipped if the function is killed between the claim and the action, or if releasing the receipt after a failed action also fails. Receipts expire after 7 days. This is an accepted trade-off.
 
 ## Architecture
 
