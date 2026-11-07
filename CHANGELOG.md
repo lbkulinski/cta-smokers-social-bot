@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MIT `LICENSE`
 - README documents the deploy setup (repo variables, `production` environment, OIDC trust subject) and the missing `DISCORD_WEBHOOK_URL` and `THREADS_TOKEN_LAST_REFRESHED` secrets
-- Per-platform dedupe receipts (`PROCESSED_REPORTS_TABLE_NAME`): claimed before posting, released if the post fails; a dedupe table error is reported via `batchItemFailures` (requires `ReportBatchItemFailures` on the event source mapping) so Lambda retries from that record
+- Per-platform dedupe receipts (`PROCESSED_REPORTS_TABLE_NAME`): claimed before posting, released if the post fails; a dedupe or stations table error is reported via `batchItemFailures` (requires `ReportBatchItemFailures` on the event source mapping) so Lambda retries from that record; the rest of the batch is still processed
 - Unit tests (`pytest`), run in CI
 - Dependabot for pip and GitHub Actions
 

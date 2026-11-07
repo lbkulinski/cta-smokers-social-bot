@@ -231,7 +231,7 @@ class DedupeTests(HandlerTestCase):
         self.run_handler(rec)
         self.assert_posted(1)
 
-    def test_failed_platform_releases_receipt_and_retry_fills_gap(self):
+    def test_failed_platform_releases_receipt_so_a_redelivery_fills_gap(self):
         self.posts["bluesky_post"].side_effect = RuntimeError("down")
         rec = record("INSERT", new=image())
         self.run_handler(rec)
@@ -243,7 +243,7 @@ class DedupeTests(HandlerTestCase):
             if name != "bluesky_post":
                 self.assertEqual(self.posts[name].call_count, 1, name)
 
-    def test_dedupe_error_reports_that_record_and_stops(self):
+    def test_dedupe_error_reports_that_record_and_continues(self):
         ok = record("INSERT", new=image(car="1111"), seq=10)
         bad = record("INSERT", new=image(car="2222"), seq=11)
         after = record("INSERT", new=image(car="3333"), seq=12)
@@ -257,8 +257,8 @@ class DedupeTests(HandlerTestCase):
         self.dynamo.put_item = put
         result = self.run_handler(ok, bad, after)
         self.assertEqual(result, {"batchItemFailures": [{"itemIdentifier": "11"}]})
-        self.assertEqual(self.posts["twitter_post"].call_count, 1)  # only the first record
-        self.assertFalse(any("3333" in k for k in self.dynamo.receipts))
+        self.assertEqual(self.posts["twitter_post"].call_count, 2)  # first and third records
+        self.assertFalse(any("2222" in k for k in self.dynamo.receipts))
 
     def test_dedupe_error_without_sequence_number_fails_whole_batch(self):
         self.dynamo.fail_put = ClientError({"Error": {"Code": "InternalServerError"}}, "PutItem")

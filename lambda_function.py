@@ -389,6 +389,7 @@ def lambda_handler(event, context):
     """
     _maybe_refresh_threads_token()
 
+    failures = []
     for record in event.get("Records", []):
         # One bad record must not fail the batch: a failed invocation is retried
         # in full, which would re-post records that already succeeded.
@@ -397,15 +398,16 @@ def lambda_handler(event, context):
         except RetryableError as e:
             sequence_number = record.get("dynamodb", {}).get("SequenceNumber")
             if not sequence_number:
+                # Cannot report a record without a sequence number; fail the whole batch instead.
                 raise
-            # Stop here: Lambda retries from this record onward. Earlier records are done,
-            # and receipts keep any replay from re-posting.
-            print(f"Dependency unavailable, retrying from sequence {sequence_number}: {e}")
-            return {"batchItemFailures": [{"itemIdentifier": sequence_number}]}
+            # Lambda retries from the lowest failed sequence number. Records after it may be
+            # redelivered, which is safe because receipts stop any re-post.
+            print(f"Dependency unavailable, retrying sequence {sequence_number}: {e}")
+            failures.append({"itemIdentifier": sequence_number})
         except Exception as e:
-            print(f"Skipping record after unexpected error: {type(e).__name__}: {e}")
+            print(f"ERROR: skipping record after unexpected error: {type(e).__name__}: {e}")
 
-    return {"batchItemFailures": []}
+    return {"batchItemFailures": failures}
 
 
 def deserialize_dynamo_image(image: dict) -> dict:

@@ -1,6 +1,6 @@
 # CTA Smokers Social Bot
 
-An AWS Lambda bot that automatically posts reports of smoking incidents on Chicago CTA trains to Twitter, Bluesky, Mastodon, and Threads.
+An AWS Lambda bot that automatically posts reports of smoking incidents on Chicago CTA trains to Twitter, Bluesky, Mastodon, Threads, and Discord.
 
 ## How It Works
 
@@ -9,11 +9,11 @@ The bot is triggered by [DynamoDB Streams](https://docs.aws.amazon.com/amazondyn
 1. Deserializes the DynamoDB event payload
 2. Looks up the station name by map ID in the CTA train stations DynamoDB table
 3. Formats a post with line, destination, next stop, car number, and run number
-4. Publishes the post to all four social platforms concurrently
+4. Publishes the post to each platform in turn (Twitter, Bluesky, Mastodon, Threads, Discord)
 
-A failure on any single platform does not block the others.
+A failure on any single platform does not block the others. A failed post is logged and not retried (the record is still acknowledged), but its receipt is released so a redelivery of the record can post it.
 
-The handler uses [partial batch responses](https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-batchfailurereporting.html): if the dedupe table is unavailable it returns that record's sequence number in `batchItemFailures` and stops, so Lambda retries from there. The event source mapping must set `FunctionResponseTypes` to `["ReportBatchItemFailures"]`.
+The handler uses [partial batch responses](https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-batchfailurereporting.html): if the dedupe table or the stations table is unavailable it returns that record's sequence number in `batchItemFailures`, so Lambda retries from there (records after it may be redelivered, which the receipts make safe). The event source mapping must set `FunctionResponseTypes` to `["ReportBatchItemFailures"]`, and should use a bounded `MaximumRetryAttempts` plus an on-failure destination so a persistent outage cannot hold up the shard until stream retention expires.
 
 ### Delivery guarantees
 
