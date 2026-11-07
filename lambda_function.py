@@ -1,9 +1,14 @@
 import os
 import json
 import datetime
+import logging
 import boto3
 import requests
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 
 def _load_secrets() -> None:
     client = boto3.client("secretsmanager")
@@ -104,9 +109,9 @@ def _refresh_threads_token() -> None:
             SecretString=json.dumps(data),
         )
     except Exception as e:
-        print(f"Warning: could not persist refreshed Threads token to Secrets Manager: {type(e).__name__}: {e}")
+        logger.warning("Could not persist refreshed Threads token to Secrets Manager: %s: %s", type(e).__name__, e)
 
-    print("Threads token refreshed")
+    logger.info("Threads token refreshed")
 
 
 def _maybe_refresh_threads_token() -> None:
@@ -119,15 +124,15 @@ def _maybe_refresh_threads_token() -> None:
             age = datetime.datetime.now(datetime.timezone.utc) - last_dt
             if age.days < _THREADS_REFRESH_THRESHOLD_DAYS:
                 return
-            print(f"Threads token is {age.days} days old, refreshing")
+            logger.info("Threads token is %d days old, refreshing", age.days)
         except ValueError:
-            print(f"Warning: could not parse THREADS_TOKEN_LAST_REFRESHED ({last_refreshed!r}), refreshing as a precaution")
+            logger.warning("Could not parse THREADS_TOKEN_LAST_REFRESHED (%r), refreshing as a precaution", last_refreshed)
     else:
-        print("THREADS_TOKEN_LAST_REFRESHED not set, refreshing to establish baseline")
+        logger.info("THREADS_TOKEN_LAST_REFRESHED not set, refreshing to establish baseline")
     try:
         _refresh_threads_token()
     except Exception as e:
-        print(f"Warning: could not refresh Threads token: {e}")
+        logger.warning("Could not refresh Threads token: %s", e)
 
 
 def mastodon_post(text: str) -> dict:
@@ -284,7 +289,7 @@ def _release(receipt_key: str) -> None:
             Key={"reportKey": {"S": receipt_key}},
         )
     except Exception as e:
-        print(f"ERROR: could not release receipt {receipt_key}, a retry will skip this platform: {type(e).__name__}")
+        logger.error("Could not release receipt %s, a retry will skip this platform: %s", receipt_key, type(e).__name__)
 
 
 def _describe_error(e: Exception) -> str:
@@ -301,12 +306,12 @@ def _post_once(report_key_: str, platform: str, post_fn, describe, text: str) ->
     """Claim a receipt, then post. A crash after the claim drops a post but never duplicates one."""
     receipt_key = f"{report_key_}#{platform}"
     if not _claim(receipt_key):
-        print(f"Skipping {platform}: already posted {receipt_key}")
+        logger.info("Skipping %s: already posted %s", platform, receipt_key)
         return
     try:
         response = post_fn(text)
     except Exception as e:
-        print(f"Failed to post to {platform}: {_describe_error(e)}")
+        logger.error("Failed to post to %s: %s", platform, _describe_error(e))
         _release(receipt_key)
         return
     # The post succeeded: never release the receipt past this point, or a retry would repost.
@@ -314,7 +319,7 @@ def _post_once(report_key_: str, platform: str, post_fn, describe, text: str) ->
         detail = describe(response)
     except Exception:
         detail = "response details unavailable"
-    print(f"{platform} post created, {detail}")
+    logger.info("%s post created, %s", platform, detail)
 
 
 def _parse_reported_at(report: dict) -> datetime.datetime | None:
@@ -359,15 +364,15 @@ def _process_record(record: dict) -> None:
 
     report = deserialize_dynamo_image(new_image)
     if _parse_reported_at(report) is None:
-        print(f"Skipping report with missing or malformed reportedAt: {json.dumps(report)}")
+        logger.warning("Skipping report with missing or malformed reportedAt: %s", json.dumps(report))
         return
 
     key = report_key(report)
-    print(f"Processing report {key}: {json.dumps(report)}")
+    logger.info("Processing report %s: %s", key, json.dumps(report))
 
     post_text = build_post(report)
     if post_text is None:
-        print(f"Skipping report {key} with unknown station: {json.dumps(report)}")
+        logger.warning("Skipping report %s with unknown station: %s", key, json.dumps(report))
         return
 
     platforms = [
@@ -402,10 +407,10 @@ def lambda_handler(event, context):
                 raise
             # Lambda retries from the lowest failed sequence number. Records after it may be
             # redelivered, which is safe because receipts stop any re-post.
-            print(f"Dependency unavailable, retrying sequence {sequence_number}: {e}")
+            logger.error("Dependency unavailable, retrying sequence %s: %s", sequence_number, e)
             failures.append({"itemIdentifier": sequence_number})
         except Exception as e:
-            print(f"ERROR: skipping record after unexpected error: {type(e).__name__}: {e}")
+            logger.error("Skipping record after unexpected error: %s: %s", type(e).__name__, e)
 
     return {"batchItemFailures": failures}
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Logging uses the standard `logging` module (INFO and above, with levels) instead of `print`, matching the other consumers
 - A failed stations-table lookup is reported via `batchItemFailures` and retried, instead of being treated as an unknown station and dropping the report
 - A post whose platform response can't be summarized no longer releases its receipt, so a retry can't repost it
 - Dedupe table env var is `PROCESSED_REPORTS_TABLE_NAME`, matching the aggregates and submitter consumers (each still points at its own table)

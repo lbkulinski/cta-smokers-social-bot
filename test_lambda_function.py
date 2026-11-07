@@ -269,15 +269,11 @@ class DedupeTests(HandlerTestCase):
         self.assert_posted(0)
 
     def test_failed_release_is_logged_as_error(self):
-        import contextlib
-        import io
-
         self.posts["bluesky_post"].side_effect = RuntimeError("down")
         self.dynamo.delete_item = mock.Mock(side_effect=RuntimeError("denied"))
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with self.assertLogs(level="ERROR") as logs:
             self.run_handler(record("INSERT", new=image()))
-        self.assertIn("ERROR: could not release receipt", out.getvalue())
+        self.assertIn("Could not release receipt", "\n".join(logs.output))
 
     def test_unparseable_response_does_not_release_receipt_or_repost(self):
         self.posts["twitter_post"].return_value = {}  # describe() expects r["data"]["id"]
@@ -303,9 +299,6 @@ class DedupeTests(HandlerTestCase):
 
 class ErrorLoggingTests(HandlerTestCase):
     def test_failed_post_logs_status_but_not_url_or_secrets(self):
-        import contextlib
-        import io
-
         import requests
 
         secret_url = "https://discord.com/api/webhooks/123/SECRET-TOKEN"
@@ -314,10 +307,9 @@ class ErrorLoggingTests(HandlerTestCase):
         resp.url = secret_url
         err = requests.HTTPError(f"401 Client Error: Unauthorized for url: {secret_url}", response=resp)
         self.posts["discord_post"].side_effect = err
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with self.assertLogs(level="INFO") as logs:
             self.run_handler(record("INSERT", new=image()))
-        logged = out.getvalue()
+        logged = "\n".join(logs.output)
         self.assertNotIn("SECRET-TOKEN", logged)
         self.assertIn("Failed to post to discord: HTTPError (HTTP 401)", logged)
 
