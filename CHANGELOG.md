@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Target the Python 3.14 Lambda runtime (x86_64); CI and deploy build and test on Python 3.14
+- Target the Python 3.15 Lambda runtime (x86_64); CI and deploy build and test on Python 3.15
 - Logging uses the standard `logging` module (INFO and above, with levels) instead of `print`, matching the other consumers
 - A failed stations-table lookup is reported via `batchItemFailures` and retried, instead of being treated as an unknown station and dropping the report
 - A post whose platform response can't be summarized no longer releases its receipt, so a retry can't repost it
