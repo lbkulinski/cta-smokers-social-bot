@@ -1,4 +1,4 @@
 # Test-only dependencies (not packaged with the Lambda).
 -r requirements.txt
-boto3==1.40.0
+boto3==1.43.124
 pytest==8.4.1
