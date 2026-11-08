@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A failed Threads post now logs the step (container creation or publish), HTTP status and the Graph API error fields (`type`, `code`, `error_subcode`, `message`, `fbtrace_id`), or the elapsed time and exception type for a timeout or connection error; successful steps log their duration. Access tokens and URLs are never logged
 - Target the Python 3.15 Lambda runtime (x86_64); CI and deploy build and test on Python 3.15
 - Logging uses the standard `logging` module (INFO and above, with levels) instead of `print`, matching the other consumers
 - A failed stations-table lookup is reported via `batchItemFailures` and retried, instead of being treated as an unknown station and dropping the report

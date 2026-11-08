@@ -352,3 +352,67 @@ class ReportIdTests(unittest.TestCase):
     def test_report_key_is_car_number_line_plus_reported_at(self):
         report = lf.deserialize_dynamo_image(image())
         self.assertEqual(lf.report_key(report), f"2435#RED#{REPORTED_AT}")
+
+
+class ThreadsErrorLoggingTests(unittest.TestCase):
+    TOKEN = "secret-threads-token"
+
+    def setUp(self):
+        env = mock.patch.dict(os.environ, {"THREADS_USER_ID": "123", "THREADS_ACCESS_TOKEN": self.TOKEN})
+        env.start()
+        self.addCleanup(env.stop)
+
+    @staticmethod
+    def response(status, body=None, text=""):
+        resp = mock.Mock(status_code=status, ok=status < 400, text=text)
+        if body is None:
+            resp.json.side_effect = ValueError("no json")
+        else:
+            resp.json.return_value = body
+        return resp
+
+    def test_graph_error_fields_are_in_the_message(self):
+        error = {"error": {"type": "OAuthException", "code": 190, "error_subcode": 463,
+                           "message": "Session has expired", "fbtrace_id": "AbC123"}}
+        with mock.patch.object(lf.requests, "post", return_value=self.response(400, error)):
+            with self.assertRaises(lf.PlatformError) as ctx:
+                lf.threads_post("hi")
+        message = str(ctx.exception)
+        for expected in ("container creation", "HTTP 400", "OAuthException", "190", "463", "Session has expired", "AbC123"):
+            self.assertIn(expected, message)
+        self.assertNotIn(self.TOKEN, message)
+
+    def test_non_json_error_falls_back_to_body(self):
+        container = self.response(200, {"id": "c1"})
+        publish = self.response(502, text="Bad Gateway")
+        with mock.patch.object(lf.requests, "post", side_effect=[container, publish]):
+            with self.assertRaises(lf.PlatformError) as ctx:
+                lf.threads_post("hi")
+        self.assertIn("publish failed: HTTP 502", str(ctx.exception))
+        self.assertIn("Bad Gateway", str(ctx.exception))
+
+    def test_timeout_names_the_step_and_hides_the_url(self):
+        container = self.response(200, {"id": "c1"})
+        timeout = lf.requests.exceptions.ReadTimeout(f"https://graph.threads.net/x?access_token={self.TOKEN}")
+        with mock.patch.object(lf.requests, "post", side_effect=[container, timeout]):
+            with self.assertRaises(lf.PlatformError) as ctx:
+                lf.threads_post("hi")
+        message = str(ctx.exception)
+        self.assertIn("publish request failed", message)
+        self.assertIn("ReadTimeout", message)
+        self.assertNotIn(self.TOKEN, message)
+
+    def test_success_logs_each_step(self):
+        responses = [self.response(200, {"id": "c1"}), self.response(200, {"id": "p1"})]
+        with mock.patch.object(lf.requests, "post", side_effect=responses):
+            with self.assertLogs(level="INFO") as logs:
+                result = lf.threads_post("hi")
+        self.assertEqual(result, {"id": "p1"})
+        output = "\n".join(logs.output)
+        self.assertIn("container creation ok", output)
+        self.assertIn("publish ok", output)
+
+    def test_describe_error_uses_platform_error_message(self):
+        self.assertEqual(lf._describe_error(lf.PlatformError("Threads publish failed: HTTP 400")),
+                         "Threads publish failed: HTTP 400")
+        self.assertEqual(lf._describe_error(RuntimeError("secret")), "RuntimeError")
