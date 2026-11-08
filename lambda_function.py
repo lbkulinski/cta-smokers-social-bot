@@ -1,7 +1,9 @@
 import os
+import re
 import json
 import datetime
 import logging
+import time
 import boto3
 import requests
 from botocore.exceptions import ClientError
@@ -51,27 +53,69 @@ def twitter_post(text: str) -> dict:
     return resp.json()
 
 
+class PlatformError(RuntimeError):
+    """A platform call failed. The message is built to be safe to log: no URLs, tokens or request params."""
+
+
+_ACCESS_TOKEN_PARAM_RE = re.compile(r"access_token=[^&\s\"']+")
+
+
+def _redact(text: str) -> str:
+    """Strip the Threads access token (as a value or as a query parameter) from text headed for the logs."""
+    token = os.environ.get("THREADS_ACCESS_TOKEN")
+    if token:
+        text = text.replace(token, "[redacted]")
+    return _ACCESS_TOKEN_PARAM_RE.sub("access_token=[redacted]", text)
+
+
+def _threads_error(step: str, resp: requests.Response) -> PlatformError:
+    """Describe a failed Threads call using the Graph API error fields."""
+    try:
+        payload = resp.json()
+    except ValueError:
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict) and error:
+        detail = (
+            f"type={error.get('type')} code={error.get('code')} subcode={error.get('error_subcode')} "
+            f"message={error.get('message')!r} fbtrace_id={error.get('fbtrace_id')}"
+        )
+    else:
+        detail = f"body={resp.text[:200]!r}"
+    return PlatformError(f"Threads {step} failed: HTTP {resp.status_code}: {_redact(detail)}")
+
+
+def _threads_request(step: str, url: str, params: dict) -> dict:
+    """POST to the Threads API. Failures carry the step name and the Graph API error, never the token."""
+    started = time.monotonic()
+    try:
+        resp = requests.post(url, params=params, timeout=10)
+    except requests.RequestException as e:
+        elapsed = time.monotonic() - started
+        raise PlatformError(f"Threads {step} request failed after {elapsed:.1f}s: {type(e).__name__}") from None
+    elapsed = time.monotonic() - started
+    if not resp.ok:
+        raise _threads_error(step, resp)
+    logger.info("Threads %s ok: HTTP %d in %.1fs", step, resp.status_code, elapsed)
+    return resp.json()
+
+
 def threads_post(text: str) -> dict:
     user_id = os.environ["THREADS_USER_ID"]
     token = os.environ["THREADS_ACCESS_TOKEN"]
+    base = f"https://graph.threads.net/v1.0/{user_id}"
 
-    container = requests.post(
-        f"https://graph.threads.net/v1.0/{user_id}/threads",
-        params={"media_type": "TEXT", "text": text, "access_token": token},
-        timeout=10,
+    container = _threads_request(
+        "container creation",
+        f"{base}/threads",
+        {"media_type": "TEXT", "text": text, "access_token": token},
     )
-    if not container.ok:
-        raise RuntimeError(f"Threads container creation failed: HTTP {container.status_code}: {container.text[:200]}")
-    container_id = container.json()["id"]
-
-    publish = requests.post(
-        f"https://graph.threads.net/v1.0/{user_id}/threads_publish",
-        params={"creation_id": container_id, "access_token": token},
-        timeout=10,
+    container_id = container["id"]
+    return _threads_request(
+        "publish",
+        f"{base}/threads_publish",
+        {"creation_id": container_id, "access_token": token},
     )
-    if not publish.ok:
-        raise RuntimeError(f"Threads publish failed: HTTP {publish.status_code}: {publish.text[:200]}")
-    return publish.json()
 
 
 _THREADS_REFRESH_THRESHOLD_DAYS = 50
@@ -293,11 +337,13 @@ def _release(receipt_key: str) -> None:
 
 
 def _describe_error(e: Exception) -> str:
-    """Error summary safe to log: exception type and HTTP status only.
+    """Error summary safe to log: exception type and HTTP status only, or a PlatformError's own message.
 
     requests puts the full URL in its messages, and some URLs are secrets
     (Discord webhook, Threads access_token query param).
     """
+    if isinstance(e, PlatformError):
+        return str(e)
     status = getattr(getattr(e, "response", None), "status_code", None)
     return f"{type(e).__name__} (HTTP {status})" if status else type(e).__name__
 
