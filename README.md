@@ -21,7 +21,7 @@ Stream delivery is at least once, so the function claims a receipt before acting
 
 ## Architecture
 
-- **Compute:** AWS Lambda (Python 3)
+- **Compute:** AWS Lambda (Python 3.14, x86_64)
 - **Trigger:** DynamoDB Streams (`NEW_AND_OLD_IMAGES`; INSERT and MODIFY events must reach the function)
 - **Secrets:** AWS Secrets Manager
 - **Station data:** DynamoDB stations table (`mapId` partition key), queried per station and cached per container
@@ -78,6 +78,8 @@ cp lambda_function.py package/
 cd package && zip -r ../lambda.zip . && cd ..
 ```
 
+The function runs on the Python 3.14 runtime on x86_64. Build the package with the same Python version and architecture, because some dependencies ship compiled code. CI and deploy use Python 3.14 on Linux x86_64.
+
 ## Tests
 
 ```bash
@@ -87,7 +89,7 @@ pytest
 
 ## CI/CD
 
-- `.github/workflows/ci.yml` runs `ruff` and `pytest` on pull requests to `main` (Python 3.12).
+- `.github/workflows/ci.yml` runs `ruff` and `pytest` on pull requests to `main` (Python 3.14).
 - `.github/workflows/deploy.yml` runs CI (lint and tests), then updates the Lambda's code (dependencies from `requirements.txt` are bundled into `lambda.zip`). It runs on every push to `main` and can also be run manually. It only updates code; environment variables, tables, IAM and the event source mapping are managed elsewhere.
 - `.github/dependabot.yml` checks the Python dependencies and the workflow actions weekly.
 
