@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import datetime
 import logging
@@ -56,12 +57,24 @@ class PlatformError(RuntimeError):
     """A platform call failed. The message is built to be safe to log: no URLs, tokens or request params."""
 
 
+_ACCESS_TOKEN_PARAM_RE = re.compile(r"access_token=[^&\s\"']+")
+
+
+def _redact(text: str) -> str:
+    """Strip the Threads access token (as a value or as a query parameter) from text headed for the logs."""
+    token = os.environ.get("THREADS_ACCESS_TOKEN")
+    if token:
+        text = text.replace(token, "[redacted]")
+    return _ACCESS_TOKEN_PARAM_RE.sub("access_token=[redacted]", text)
+
+
 def _threads_error(step: str, resp: requests.Response) -> PlatformError:
     """Describe a failed Threads call using the Graph API error fields."""
     try:
-        error = resp.json().get("error", {})
+        payload = resp.json()
     except ValueError:
-        error = {}
+        payload = None
+    error = payload.get("error") if isinstance(payload, dict) else None
     if isinstance(error, dict) and error:
         detail = (
             f"type={error.get('type')} code={error.get('code')} subcode={error.get('error_subcode')} "
@@ -69,7 +82,7 @@ def _threads_error(step: str, resp: requests.Response) -> PlatformError:
         )
     else:
         detail = f"body={resp.text[:200]!r}"
-    return PlatformError(f"Threads {step} failed: HTTP {resp.status_code}: {detail}")
+    return PlatformError(f"Threads {step} failed: HTTP {resp.status_code}: {_redact(detail)}")
 
 
 def _threads_request(step: str, url: str, params: dict) -> dict:

@@ -391,6 +391,32 @@ class ThreadsErrorLoggingTests(unittest.TestCase):
         self.assertIn("publish failed: HTTP 502", str(ctx.exception))
         self.assertIn("Bad Gateway", str(ctx.exception))
 
+    def test_non_mapping_json_falls_back_to_body(self):
+        for payload in ([], "oops", None, 42, {"error": "flat string"}):
+            with self.subTest(payload=payload):
+                resp = self.response(503, payload, text="upstream down")
+                with mock.patch.object(lf.requests, "post", return_value=resp):
+                    with self.assertRaises(lf.PlatformError) as ctx:
+                        lf.threads_post("hi")
+                self.assertIn("HTTP 503", str(ctx.exception))
+                self.assertIn("upstream down", str(ctx.exception))
+
+    def test_token_is_redacted_from_body_and_message(self):
+        echoed = f"bad url https://graph.threads.net/x?access_token={self.TOKEN}&text=hi"
+        cases = [
+            self.response(502, text=echoed),
+            self.response(400, {"error": {"message": f"invalid token {self.TOKEN}"}}),
+            self.response(400, text="https://graph.threads.net/x?access_token=some-other-token&a=b"),
+        ]
+        for resp in cases:
+            with self.subTest(text=resp.text):
+                with mock.patch.object(lf.requests, "post", return_value=resp):
+                    with self.assertRaises(lf.PlatformError) as ctx:
+                        lf.threads_post("hi")
+                message = str(ctx.exception)
+                self.assertNotIn(self.TOKEN, message)
+                self.assertNotIn("some-other-token", message)
+
     def test_timeout_names_the_step_and_hides_the_url(self):
         container = self.response(200, {"id": "c1"})
         timeout = lf.requests.exceptions.ReadTimeout(f"https://graph.threads.net/x?access_token={self.TOKEN}")
