@@ -1,2 +1,2 @@
 requests==2.32.3
-requests-oauthlib
+requests-oauthlib==2.0.0

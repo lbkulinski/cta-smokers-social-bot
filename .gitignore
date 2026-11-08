@@ -1,0 +1,12 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.zip
+.idea/
+.DS_Store
+.claude/settings.local.json
+
+# Lambda build output
+package/
+lambda/
