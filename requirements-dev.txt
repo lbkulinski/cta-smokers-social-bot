@@ -1,4 +1,4 @@
 # Test-only dependencies (not packaged with the Lambda).
 -r requirements.txt
 boto3==1.40.0
-pytest==8.4.1
+pytest==9.2.0
